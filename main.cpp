@@ -2,9 +2,13 @@
 #include<random>
 #include<cmath>
 #include<vector>
+
 #include "simulator.h"
+#include "gbm.h"
+#include "black_scholes.h"
 
 using namespace std;
+
 
 double compute_dp(int k){
     vector<double> dp(k+1);
@@ -22,46 +26,64 @@ double compute_dp(int k){
     return dp[k];
 }
 
-
 int main(){
-    int N = 1000000;
-    Simulator sim(N);
-
-    cout<<"Dynamic Programming Results";
+    cout << "Dynamic Programming Results\n";
     for(int k = 0; k <= 5; k++){
         double exact = compute_dp(k);
-        cout<<"Rerolls: "<<k<<" | DP EV: "<<exact<<endl;
+        cout << "Rerolls: " << k << " | DP EV: " << exact << endl;
     }
 
-    cout<<"Monte Carlo Simulation"<<endl;
-    for(int k = 1; k <= 6; k++){
+    cout << "\nMonte Carlo Option Pricing (GBM)\n";
 
-        //Lambda function 
-        auto experiment = [k]() {
-            thread_local mt19937 gen(random_device{}());
-            uniform_int_distribution<> dist(1, 6);
+    
+    double S0 = 100.0;   // initial price
+    double K = 100.0;    // strike
+    double r = 0.05;     // risk-free rate
+    double sigma = 0.2;  // volatility
+    double T = 1.0;      // 1 year
+    int steps = 252;     // daily steps
 
-            int best = 0;
-            for(int i = 0; i <= k; i++){
-                int roll = dist(gen);
-                if(roll > best) best = roll;
-            }
-            return (double)best;
+    vector<int> simulations_list = {10000, 100000, 1000000};
+
+    for(int N_sim : simulations_list){
+
+        Simulator sim(N_sim);
+
+        // Monte Carlo experiment
+        auto experiment = [&]() {
+
+            auto path = simulate_gbm(S0, r, sigma, T, steps);
+            double ST = path.back();
+
+            double payoff = max(ST - K, 0.0);
+
+            // discount payoff
+            return exp(-r * T) * payoff;
         };
 
         Result res = sim.run(experiment);
 
         double std_dev = sqrt(res.variance);
+        double margin = 1.96 * std_dev / sqrt(N_sim);
 
-        //95% confidence interval
-        double margin = 1.96 * std_dev / sqrt(N);
+        // Black-Scholes benchmark
+        double bs_price = black_scholes_call(S0, K, r, sigma, T);
 
-        cout<<"Threshold "<<k<<endl;
-        cout<<"EV: "<<res.mean<<endl;
-        cout<<"Std Dev: "<<std_dev<<endl;
-        cout<<"95% CI: ["
-            <<res.mean - margin<<", "
-            <<res.mean + margin<<"]"<<endl;
+        cout << "\n----------------------------------\n";
+        cout << "Simulations: " << N_sim << endl;
+
+        cout << "Monte Carlo Price: " << res.mean << endl;
+        cout << "Black-Scholes Price: " << bs_price << endl;
+
+        cout << "Relative Error: "
+             << abs(res.mean - bs_price) / bs_price << endl;
+
+        cout << "Std Dev: " << std_dev << endl;
+
+        cout << "95% Confidence Interval: ["
+             << res.mean - margin << ", "
+             << res.mean + margin << "]\n";
     }
+
     return 0;
 }
